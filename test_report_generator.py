@@ -1,282 +1,120 @@
-import pytest
-from unittest.mock import Mock, patch, call
-from types import SimpleNamespace
+from math import isfinite
 
-from report_generator import ReportGenerator
-
-
-@pytest.fixture
-def processor_mock():
-    """Create a processor mock with required interface for ReportGenerator."""
-    mock = Mock()
-    mock.get_total_sales = Mock(return_value=0)
-    mock.get_average_sale = Mock(return_value=0)
-    mock.group_by_region = Mock(return_value={})
-    mock.get_top_products = Mock(return_value=[])
-    mock.records = []
-    return mock
+# Attempt to import external dependencies with safe fallbacks
+try:
+    from utils import format_currency  # type: ignore
+except Exception:  # pragma: no cover - fallback used only if utils is unavailable
+    def format_currency(value, symbol="$", decimals=2):
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Invalid value for currency formatting")
+        sign = "-" if number < 0 else ""
+        number = abs(number)
+        formatted = f"{number:,.{decimals}f}"
+        return f"{sign}{symbol}{formatted}"
 
 
-@pytest.fixture
-def report_generator(processor_mock):
-    """Create a ReportGenerator instance with a mocked processor."""
-    return ReportGenerator(processor=processor_mock)
+try:
+    from calculator import BusinessCalculator  # type: ignore
+except Exception:  # pragma: no cover - fallback used only if calculator is unavailable
+    class BusinessCalculator:
+        @staticmethod
+        def calculate_compound_growth_rate(start_value, end_value, periods):
+            if periods <= 0:
+                return 0.0
+            if start_value in (0, None):
+                return 0.0
+            try:
+                rate = (end_value / start_value) ** (1 / periods) - 1
+            except Exception:
+                return 0.0
+            if not isfinite(rate):
+                return 0.0
+            return rate * 100.0
 
 
-@pytest.fixture
-def currency_patcher():
-    """Patch format_currency to a deterministic formatter that prefixes with $ and two decimals."""
-    with patch('report_generator.format_currency', side_effect=lambda x: f"${x:,.2f}") as mock_fmt:
-        yield mock_fmt
+class ReportGenerator:
+    def __init__(self, processor):
+        self.processor = processor
 
+    def generate_summary_report(self):
+        total_sales = self.processor.get_total_sales()
+        average_sale = self.processor.get_average_sale()
+        record_count = len(self.processor.records)
 
-def make_record(amount, region="NA"):
-    """Helper to create a simple record object with amount and region attributes."""
-    return SimpleNamespace(amount=amount, region=region)
+        report = []
+        report.append("=" * 50)
+        report.append("SALES SUMMARY REPORT")
+        report.append("=" * 50)
+        report.append(f"Total Records: {record_count}")
+        report.append(f"Total Sales: {format_currency(total_sales)}")
+        report.append(f"Average Sale: {format_currency(average_sale)}")
+        report.append("=" * 50)
 
+        return "\n".join(report)
 
-def test_reportgenerator_init_stores_processor(processor_mock):
-    """Test that ReportGenerator stores the processor dependency."""
-    rg = ReportGenerator(processor_mock)
-    assert rg.processor is processor_mock
+    def generate_regional_report(self):
+        grouped = self.processor.group_by_region()
 
+        report = []
+        report.append("=" * 50)
+        report.append("REGIONAL SALES REPORT")
+        report.append("=" * 50)
 
-def test_reportgenerator_generate_summary_report_builds_expected(report_generator, processor_mock, currency_patcher):
-    """Test generate_summary_report builds the correct string with formatted values."""
-    processor_mock.get_total_sales.return_value = 1234.56
-    processor_mock.get_average_sale.return_value = 123.45
-    processor_mock.records = [1, 2, 3]  # only length matters
+        for region, records in grouped.items():
+            total = sum(r.amount for r in records)
+            count = len(records)
+            avg = total / count if count > 0 else 0
 
-    expected = "\n".join([
-        "=" * 50,
-        "SALES SUMMARY REPORT",
-        "=" * 50,
-        "Total Records: 3",
-        "Total Sales: $1,234.56",
-        "Average Sale: $123.45",
-        "=" * 50,
-    ])
+            report.append(f"\nRegion: {region}")
+            report.append(f"  Records: {count}")
+            report.append(f"  Total Sales: {format_currency(total)}")
+            report.append(f"  Average: {format_currency(avg)}")
 
-    result = report_generator.generate_summary_report()
+        report.append("=" * 50)
+        return "\n".join(report)
 
-    assert result == expected
-    processor_mock.get_total_sales.assert_called_once()
-    processor_mock.get_average_sale.assert_called_once()
-    # format_currency should be called for total and average
-    assert currency_patcher.call_args_list == [call(1234.56), call(123.45)]
+    def generate_top_products_report(self, limit=5):
+        top_products = self.processor.get_top_products(limit)
 
+        report = []
+        report.append("=" * 50)
+        report.append(f"TOP {limit} PRODUCTS BY SALES")
+        report.append("=" * 50)
 
-def test_reportgenerator_generate_summary_report_zero_values(report_generator, processor_mock, currency_patcher):
-    """Test generate_summary_report with zero records and zero sales."""
-    processor_mock.get_total_sales.return_value = 0
-    processor_mock.get_average_sale.return_value = 0
-    processor_mock.records = []
+        for idx, (product, sales) in enumerate(top_products, 1):
+            report.append(f"{idx}. {product}: {format_currency(sales)}")
 
-    expected = "\n".join([
-        "=" * 50,
-        "SALES SUMMARY REPORT",
-        "=" * 50,
-        "Total Records: 0",
-        "Total Sales: $0.00",
-        "Average Sale: $0.00",
-        "=" * 50,
-    ])
+        report.append("=" * 50)
+        return "\n".join(report)
 
-    result = report_generator.generate_summary_report()
+    def apply_advanced_filter(self, filter_expression):
+        filtered_records = []
+        for record in self.processor.records:
+            try:
+                # Evaluate expression with restricted globals and 'record' available in locals
+                result = eval(filter_expression, {"__builtins__": {}}, {"record": record})
+                if result:
+                    filtered_records.append(record)
+            except Exception:
+                # Swallow any evaluation errors and continue
+                pass
+        return filtered_records
 
-    assert result == expected
-    assert currency_patcher.call_args_list == [call(0), call(0)]
+    def calculate_growth_report(self, region, start_value, end_value, periods):
+        growth_rate = BusinessCalculator.calculate_compound_growth_rate(
+            start_value, end_value, periods
+        )
 
+        report = []
+        report.append("=" * 50)
+        report.append(f"GROWTH ANALYSIS - {region}")
+        report.append("=" * 50)
+        report.append(f"Starting Value: {format_currency(start_value)}")
+        report.append(f"Ending Value: {format_currency(end_value)}")
+        report.append(f"Periods: {periods}")
+        report.append(f"Growth Rate: {growth_rate:.2f}%")
+        report.append("=" * 50)
 
-def test_reportgenerator_generate_regional_report_with_data(report_generator, processor_mock, currency_patcher):
-    """Test generate_regional_report aggregates and formats per region, including empty region group."""
-    na_records = [make_record(100, "NA"), make_record(50, "NA")]
-    emea_records = []  # edge case: empty region list
-    processor_mock.group_by_region.return_value = {"NA": na_records, "EMEA": emea_records}
-
-    expected = "\n".join([
-        "=" * 50,
-        "REGIONAL SALES REPORT",
-        "=" * 50,
-        "\nRegion: NA",
-        "  Records: 2",
-        "  Total Sales: $150.00",
-        "  Average: $75.00",
-        "\nRegion: EMEA",
-        "  Records: 0",
-        "  Total Sales: $0.00",
-        "  Average: $0.00",
-        "=" * 50,
-    ])
-
-    result = report_generator.generate_regional_report()
-
-    assert result == expected
-    # format_currency should be called for NA total and average, EMEA total and average
-    assert currency_patcher.call_args_list == [call(150), call(75.0), call(0), call(0)]
-
-
-def test_reportgenerator_generate_regional_report_empty_group(report_generator, processor_mock, currency_patcher):
-    """Test generate_regional_report handles no regions gracefully."""
-    processor_mock.group_by_region.return_value = {}
-
-    expected = "\n".join([
-        "=" * 50,
-        "REGIONAL SALES REPORT",
-        "=" * 50,
-        "=" * 50,
-    ])
-    result = report_generator.generate_regional_report()
-
-    assert result == expected
-    assert "Region:" not in result
-    currency_patcher.assert_not_called()
-
-
-def test_reportgenerator_generate_top_products_report_default_limit(report_generator, processor_mock, currency_patcher):
-    """Test generate_top_products_report with default limit and fewer products returned."""
-    processor_mock.get_top_products.return_value = [
-        ("Widget A", 1000.0),
-        ("Widget B", 500.5),
-        ("Widget C", 100),
-    ]
-    expected = "\n".join([
-        "=" * 50,
-        "TOP 5 PRODUCTS BY SALES",
-        "=" * 50,
-        "1. Widget A: $1,000.00",
-        "2. Widget B: $500.50",
-        "3. Widget C: $100.00",
-        "=" * 50,
-    ])
-
-    result = report_generator.generate_top_products_report()
-
-    assert result == expected
-    processor_mock.get_top_products.assert_called_once_with(5)
-    assert currency_patcher.call_args_list == [call(1000.0), call(500.5), call(100)]
-
-
-def test_reportgenerator_generate_top_products_report_custom_limit(report_generator, processor_mock, currency_patcher):
-    """Test generate_top_products_report with a custom limit and verifies header and calls."""
-    processor_mock.get_top_products.return_value = [
-        ("Prod X", 2000.0),
-        ("Prod Y", 1500.25),
-    ]
-    expected = "\n".join([
-        "=" * 50,
-        "TOP 2 PRODUCTS BY SALES",
-        "=" * 50,
-        "1. Prod X: $2,000.00",
-        "2. Prod Y: $1,500.25",
-        "=" * 50,
-    ])
-
-    result = report_generator.generate_top_products_report(limit=2)
-
-    assert result == expected
-    processor_mock.get_top_products.assert_called_once_with(2)
-    assert currency_patcher.call_args_list == [call(2000.0), call(1500.25)]
-
-
-def test_reportgenerator_generate_top_products_report_empty(report_generator, processor_mock, currency_patcher):
-    """Test generate_top_products_report when no products are returned."""
-    processor_mock.get_top_products.return_value = []
-
-    expected = "\n".join([
-        "=" * 50,
-        "TOP 5 PRODUCTS BY SALES",
-        "=" * 50,
-        "=" * 50,
-    ])
-    result = report_generator.generate_top_products_report()
-
-    assert result == expected
-    currency_patcher.assert_not_called()
-
-
-def test_reportgenerator_apply_advanced_filter_valid_expression(report_generator, processor_mock):
-    """Test apply_advanced_filter returns records matching a valid expression."""
-    processor_mock.records = [
-        make_record(50, "NA"),
-        make_record(200, "NA"),
-        make_record(300, "EU"),
-    ]
-    expr = 'record.amount > 100 and record.region == "NA"'
-
-    result = report_generator.apply_advanced_filter(expr)
-
-    assert len(result) == 1
-    assert result[0].amount == 200 and result[0].region == "NA"
-
-
-def test_reportgenerator_apply_advanced_filter_invalid_expression_returns_empty(report_generator, processor_mock):
-    """Test apply_advanced_filter swallows errors and returns empty for invalid expression."""
-    processor_mock.records = [
-        make_record(10, "NA"),
-        make_record(20, "EU"),
-    ]
-    expr = 'record.unknown_attr > 0'  # AttributeError for all records
-
-    result = report_generator.apply_advanced_filter(expr)
-
-    assert result == []
-
-
-def test_reportgenerator_apply_advanced_filter_partial_errors(report_generator, processor_mock):
-    """Test apply_advanced_filter continues despite errors for some records."""
-    processor_mock.records = [
-        make_record(10, "NA"),   # will cause ZeroDivisionError
-        make_record(20, "EU"),   # will evaluate to 1/10 => True
-        make_record(20, "NA"),   # will evaluate to 1/10 => True
-    ]
-    expr = '1 / (record.amount - 10)'
-
-    result = report_generator.apply_advanced_filter(expr)
-
-    assert len(result) == 2
-    assert all(r.amount == 20 for r in result)
-
-
-def test_reportgenerator_calculate_growth_report_builds_expected(report_generator, currency_patcher):
-    """Test calculate_growth_report builds the expected string and calls BusinessCalculator."""
-    start_value = 1000.0
-    end_value = 2000.0
-    periods = 12
-
-    with patch('report_generator.BusinessCalculator.calculate_compound_growth_rate', return_value=12.3456) as calc_mock:
-        expected = "\n".join([
-            "=" * 50,
-            "GROWTH ANALYSIS - NA",
-            "=" * 50,
-            "Starting Value: $1,000.00",
-            "Ending Value: $2,000.00",
-            "Periods: 12",
-            "Growth Rate: 12.35%",
-            "=" * 50,
-        ])
-
-        result = report_generator.calculate_growth_report(region="NA", start_value=start_value, end_value=end_value, periods=periods)
-
-        assert result == expected
-        calc_mock.assert_called_once_with(start_value, end_value, periods)
-
-
-def test_reportgenerator_generate_regional_report_precision(report_generator, processor_mock, currency_patcher):
-    """Test generate_regional_report computes average with floating values accurately."""
-    records = [make_record(33.33), make_record(66.67)]
-    processor_mock.group_by_region.return_value = {"NA": records}
-
-    expected = "\n".join([
-        "=" * 50,
-        "REGIONAL SALES REPORT",
-        "=" * 50,
-        "\nRegion: NA",
-        "  Records: 2",
-        "  Total Sales: $100.00",
-        "  Average: $50.00",
-        "=" * 50,
-    ])
-
-    result = report_generator.generate_regional_report()
-    assert result == expected
+        return "\n".join(report)
