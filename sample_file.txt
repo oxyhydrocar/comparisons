@@ -1,0 +1,14 @@
+This is a sample file that will be shared by the server to all 100 clients.
+
+The file transfer happens in parallel using threading, which means all clients
+receive the file simultaneously once all 100 connections are established.
+
+This demonstrates a broadcast-style file sharing system where:
+1. Server waits for exactly 100 connections
+2. Once all connections are received, it starts sending the file
+3. All clients receive the file in parallel using separate threads
+
+You can modify this file to test with different content or sizes.
+For testing with larger files, consider creating a bigger sample file.
+
+End of sample file.
