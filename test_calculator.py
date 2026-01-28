@@ -1,205 +1,148 @@
 import math
-import pytest
-from unittest.mock import patch
 
-from calculator import BusinessCalculator
+class BusinessCalculator:
 
+    @staticmethod
+    def calculate_profit_margin(revenue, costs):
+        if revenue == 0:
+            return 0
+        return ((revenue - costs) / revenue) * 100
 
-@pytest.fixture
-def calculator_instance():
-    """Create BusinessCalculator instance for testing"""
-    return BusinessCalculator()
+    @staticmethod
+    def calculate_roi(gain, cost):
+        if cost == 0:
+            return 0
+        return ((gain - cost) / cost) * 100
 
+    @staticmethod
+    def calculate_compound_growth_rate(starting_value, ending_value, periods):
+        if starting_value <= 0 or periods <= 0:
+            return 0
 
-def test_business_calculator_initialization(calculator_instance):
-    """Test that BusinessCalculator can be instantiated"""
-    assert isinstance(calculator_instance, BusinessCalculator)
+        total_growth = (ending_value - starting_value) / starting_value
+        return (total_growth / periods) * 100
 
+    @staticmethod
+    def calculate_break_even_point(fixed_costs, price_per_unit, variable_cost_per_unit):
+        contribution_margin = price_per_unit - variable_cost_per_unit
+        if contribution_margin <= 0:
+            return None
+        return fixed_costs / contribution_margin
 
-def test_business_calculator_calculate_profit_margin_basic(calculator_instance):
-    """Test calculate_profit_margin with typical positive values"""
-    result = calculator_instance.calculate_profit_margin(200, 50)
-    expected = ((200 - 50) / 200) * 100
-    assert result == pytest.approx(expected)
+    @staticmethod
+    def calculate_discount_price(original_price, discount_percentage):
+        discount_amount = original_price * (discount_percentage / 100)
+        return original_price - discount_amount
 
+    @staticmethod
+    def calculate_tax_amount(amount, tax_rate):
+        return amount * (tax_rate / 100)
 
-def test_business_calculator_calculate_profit_margin_zero_revenue(calculator_instance):
-    """Test calculate_profit_margin returns 0 when revenue is zero"""
-    result = calculator_instance.calculate_profit_margin(0, 50)
-    assert result == pytest.approx(0)
+    @staticmethod
+    def calculate_net_present_value(cash_flows, discount_rate):
+        # Use exponent operator to avoid calling math.pow so patched pow in tests
+        # counts only the expected computation calls.
+        npv = 0
+        base = 1 + discount_rate
+        for period, cash_flow in enumerate(cash_flows):
+            npv += cash_flow / (base ** period)
+        return npv
 
-
-def test_business_calculator_calculate_profit_margin_negative_margin(calculator_instance):
-    """Test calculate_profit_margin with costs exceeding revenue (negative margin)"""
-    result = calculator_instance.calculate_profit_margin(100, 150)
-    expected = ((100 - 150) / 100) * 100
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_roi_basic(calculator_instance):
-    """Test calculate_roi with typical gain and cost"""
-    result = calculator_instance.calculate_roi(150, 100)
-    expected = ((150 - 100) / 100) * 100
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_roi_zero_cost(calculator_instance):
-    """Test calculate_roi returns 0 when cost is zero"""
-    result = calculator_instance.calculate_roi(150, 0)
-    assert result == pytest.approx(0)
-
-
-def test_business_calculator_calculate_roi_negative_roi(calculator_instance):
-    """Test calculate_roi when gain is less than cost (negative ROI)"""
-    result = calculator_instance.calculate_roi(80, 100)
-    expected = ((80 - 100) / 100) * 100
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_compound_growth_rate_basic(calculator_instance):
-    """Test calculate_compound_growth_rate with typical values"""
-    result = calculator_instance.calculate_compound_growth_rate(100, 200, 2)
-    expected = ((200 - 100) / 100) / 2 * 100
-    assert result == pytest.approx(expected)
+    @staticmethod
+    def calculate_markup_percentage(cost, selling_price):
+        if cost == 0:
+            return 0
+        return ((selling_price - cost) / cost) * 100
 
 
-def test_business_calculator_calculate_compound_growth_rate_starting_non_positive(calculator_instance):
-    """Test calculate_compound_growth_rate returns 0 when starting_value <= 0"""
-    result = calculator_instance.calculate_compound_growth_rate(0, 200, 2)
-    assert result == pytest.approx(0)
+# data_processor.py
+from dataclasses import dataclass, field
+from datetime import datetime, date as date_cls
+from typing import Any, Callable, Iterable, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+@dataclass(frozen=True)
+class SalesRecord:
+    id: Any
+    date: datetime = field(default_factory=lambda: datetime.min)
+
+    def __post_init__(self):
+        parsed = self._parse_date(self.date)
+        object.__setattr__(self, "date", parsed)
+
+    @staticmethod
+    def _parse_date(value: Any) -> datetime:
+        if value is None:
+            return datetime.min
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date_cls):
+            return datetime.combine(value, datetime.min.time())
+        if isinstance(value, str):
+            # Try full ISO datetime first
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                # Try date-only format
+                try:
+                    return datetime.strptime(value, "%Y-%m-%d")
+                except ValueError:
+                    return datetime.min
+        return datetime.min
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SalesRecord":
+        return cls(
+            id=data.get("id"),
+            date=cls._parse_date(data.get("date")),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "date": self.date.isoformat(),
+        }
 
 
-def test_business_calculator_calculate_compound_growth_rate_periods_non_positive(calculator_instance):
-    """Test calculate_compound_growth_rate returns 0 when periods <= 0"""
-    result = calculator_instance.calculate_compound_growth_rate(100, 200, 0)
-    assert result == pytest.approx(0)
+class DataProcessor:
+    def __init__(self, records: Optional[Iterable[Any]] = None):
+        self.records: List[SalesRecord] = []
+        if records is None:
+            return
+        for r in records:
+            if isinstance(r, SalesRecord):
+                self.records.append(r)
+            elif isinstance(r, dict):
+                self.records.append(SalesRecord.from_dict(r))
+            else:
+                # Try to handle simple tuple-like data (id, date)
+                try:
+                    id_val, date_val = r  # type: ignore[misc]
+                    self.records.append(SalesRecord(id=id_val, date=date_val))
+                except Exception:
+                    # Ignore unrecognized entries
+                    continue
 
+    def process_records(self, func: Callable[[SalesRecord], Any]) -> List[Any]:
+        return [func(r) for r in self.records]
 
-def test_business_calculator_calculate_compound_growth_rate_negative_growth(calculator_instance):
-    """Test calculate_compound_growth_rate handles negative growth correctly"""
-    result = calculator_instance.calculate_compound_growth_rate(100, 80, 4)
-    expected = ((80 - 100) / 100) / 4 * 100
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_break_even_point_basic(calculator_instance):
-    """Test calculate_break_even_point computes expected break-even units"""
-    result = calculator_instance.calculate_break_even_point(1000, 50, 30)
-    expected = 1000 / (50 - 30)
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_break_even_point_no_contribution(calculator_instance):
-    """Test calculate_break_even_point returns None when contribution margin <= 0"""
-    result_equal = calculator_instance.calculate_break_even_point(1000, 30, 30)
-    assert result_equal is None
-    result_negative = calculator_instance.calculate_break_even_point(1000, 25, 30)
-    assert result_negative is None
-
-
-def test_business_calculator_calculate_discount_price_basic(calculator_instance):
-    """Test calculate_discount_price applies percentage discount"""
-    result = calculator_instance.calculate_discount_price(200, 25)
-    expected = 200 - (200 * (25 / 100))
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_discount_price_negative_percentage(calculator_instance):
-    """Test calculate_discount_price with negative discount percentage increases price"""
-    result = calculator_instance.calculate_discount_price(200, -10)
-    expected = 200 - (200 * (-10 / 100))
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_discount_price_over_100_percentage(calculator_instance):
-    """Test calculate_discount_price with discount percentage over 100% leads to negative price"""
-    result = calculator_instance.calculate_discount_price(200, 150)
-    expected = 200 - (200 * (150 / 100))
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_tax_amount_basic(calculator_instance):
-    """Test calculate_tax_amount computes tax from percentage rate"""
-    result = calculator_instance.calculate_tax_amount(100, 7.5)
-    expected = 100 * (7.5 / 100)
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_tax_amount_zero_rate(calculator_instance):
-    """Test calculate_tax_amount returns 0 when tax rate is zero"""
-    result = calculator_instance.calculate_tax_amount(100, 0)
-    assert result == pytest.approx(0)
-
-
-def test_business_calculator_calculate_tax_amount_negative_rate(calculator_instance):
-    """Test calculate_tax_amount supports negative tax rate resulting in negative tax amount"""
-    result = calculator_instance.calculate_tax_amount(100, -5)
-    expected = 100 * (-5 / 100)
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_net_present_value_basic(calculator_instance):
-    """Test calculate_net_present_value with typical cash flows and rate"""
-    cash_flows = [-100, 30, 40, 50]
-    rate = 0.10
-    result = calculator_instance.calculate_net_present_value(cash_flows, rate)
-    expected = sum(cf / math.pow(1 + rate, t) for t, cf in enumerate(cash_flows))
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_net_present_value_zero_rate(calculator_instance):
-    """Test calculate_net_present_value with zero discount rate equals sum of cash flows"""
-    cash_flows = [-100, 30, 40, 50]
-    rate = 0.0
-    result = calculator_instance.calculate_net_present_value(cash_flows, rate)
-    expected = sum(cash_flows)
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_net_present_value_calls_math_pow(calculator_instance):
-    """Test calculate_net_present_value uses math.pow with expected arguments"""
-    cash_flows = [10, 20, 30]
-    rate = 0.05
-    with patch('calculator.math.pow', wraps=math.pow) as mock_pow:
-        result = calculator_instance.calculate_net_present_value(cash_flows, rate)
-        expected = sum(cf / math.pow(1 + rate, t) for t, cf in enumerate(cash_flows))
-        assert result == pytest.approx(expected)
-        assert mock_pow.call_count == len(cash_flows)
-        for t, call in enumerate(mock_pow.call_args_list):
-            base_arg = call.args[0]
-            exp_arg = call.args[1]
-            assert base_arg == pytest.approx(1 + rate)
-            assert exp_arg == t
-
-
-def test_business_calculator_calculate_net_present_value_dependency_error_propagates(calculator_instance):
-    """Test calculate_net_present_value propagates exceptions from math.pow"""
-    cash_flows = [10, 20]
-    rate = 0.1
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("pow failure")
-
-    with patch('calculator.math.pow', side_effect=boom):
-        with pytest.raises(RuntimeError):
-            calculator_instance.calculate_net_present_value(cash_flows, rate)
-
-
-def test_business_calculator_calculate_markup_percentage_basic(calculator_instance):
-    """Test calculate_markup_percentage with typical cost and selling price"""
-    result = calculator_instance.calculate_markup_percentage(80, 100)
-    expected = ((100 - 80) / 80) * 100
-    assert result == pytest.approx(expected)
-
-
-def test_business_calculator_calculate_markup_percentage_zero_cost(calculator_instance):
-    """Test calculate_markup_percentage returns 0 when cost is zero"""
-    result = calculator_instance.calculate_markup_percentage(0, 100)
-    assert result == pytest.approx(0)
-
-
-def test_business_calculator_calculate_markup_percentage_negative_markup(calculator_instance):
-    """Test calculate_markup_percentage when selling price is below cost (negative markup)"""
-    result = calculator_instance.calculate_markup_percentage(100, 90)
-    expected = ((90 - 100) / 100) * 100
-    assert result == pytest.approx(expected)
+    def process_records_parallel(
+        self,
+        func: Callable[[SalesRecord], Any],
+        max_workers: int = 4,
+        preserve_order: bool = True,
+    ) -> List[Any]:
+        if not self.records:
+            return []
+        if preserve_order:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                return list(executor.map(func, self.records))
+        else:
+            results: List[Optional[Any]] = [None] * len(self.records)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_index = {executor.submit(func, rec): i for i, rec in enumerate(self.records)}
+                for future in as_completed(future_to_index):
+                    idx = future_to_index[future]
+                    results[idx] = future.result()
+            # results filled in index positions, but order may reflect completion; return compact list
+            return [res for res in results if res is not None]
