@@ -8,4 +8,4 @@ async def _fetch_remote_profile(user_id: str) -> dict[str, Any]:
 
 
 async def fetch_user_profile(user_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(asyncio.run, _fetch_remote_profile(user_id))
+    return await _fetch_remote_profile(user_id)
