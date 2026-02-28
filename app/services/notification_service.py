@@ -17,6 +17,7 @@ class NotificationService:
 
     def send_notification(self, notification: Notification) -> bool:
         payload = self._build_payload(notification)
+        payload["source"] = "service"
         delivered = self._deliver(payload)
         if delivered:
             self._sent_count += 1
