@@ -10,7 +10,7 @@ class Notifier:
         self._sender = sender
 
     def send_with_retry(self, message: str) -> bool:
-        retries = 3
+        retries = self.max_retries
         for _ in range(retries):
             if self._sender(message):
                 return True
